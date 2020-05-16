@@ -97,16 +97,8 @@ func GenerateContainersReadyCondition(spec *v1.PodSpec, containerStatuses []v1.C
 // The status of "Ready" condition is "True", if all containers in a pod are ready
 // AND all matching conditions specified in the ReadinessGates have status equal to "True".
 func GeneratePodReadyCondition(spec *v1.PodSpec, conditions []v1.PodCondition, containerStatuses []v1.ContainerStatus, podPhase v1.PodPhase) v1.PodCondition {
-	containersReady := GenerateContainersReadyCondition(spec, containerStatuses, podPhase)
-	// If the status of ContainersReady is not True, return the same status, reason and message as ContainersReady.
-	if containersReady.Status != v1.ConditionTrue {
-		return v1.PodCondition{
-			Type:    v1.PodReady,
-			Status:  containersReady.Status,
-			Reason:  containersReady.Reason,
-			Message: containersReady.Message,
-		}
-	}
+	unreadyMessages := []string{}
+	unreadyReasons := []string{}
 
 	// Evaluate corresponding conditions specified in readiness gate
 	// Generate message if any readiness gate is not satisfied.
@@ -120,14 +112,24 @@ func GeneratePodReadyCondition(spec *v1.PodSpec, conditions []v1.PodCondition, c
 		}
 	}
 
-	// Set "Ready" condition to "False" if any readiness gate is not ready.
 	if len(unreadyMessages) != 0 {
-		unreadyMessage := strings.Join(unreadyMessages, ", ")
+		unreadyReasons = append(unreadyReasons, ReadinessGatesNotReady)
+	}
+
+	// If the status of ContainersReady is not True, append reason and message to slice.
+	containersReady := GenerateContainersReadyCondition(spec, containerStatuses, podPhase)
+	if containersReady.Status != v1.ConditionTrue {
+		unreadyMessages = append(unreadyMessages, containersReady.Message)
+		unreadyReasons = append(unreadyReasons, containersReady.Reason)
+	}
+
+	// Set "Ready" condition to "False" if any readiness gate or containers is not ready.
+	if len(unreadyReasons) != 0 || len(unreadyMessages) != 0 {
 		return v1.PodCondition{
 			Type:    v1.PodReady,
 			Status:  v1.ConditionFalse,
-			Reason:  ReadinessGatesNotReady,
-			Message: unreadyMessage,
+			Reason:  strings.Join(unreadyMessages, "; "),
+			Message: strings.Join(unreadyReasons, "; "),
 		}
 	}
 
